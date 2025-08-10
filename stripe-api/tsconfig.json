@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "es2019",
+    "module": "commonjs",
+    "esModuleInterop": true,
+    "strict": true,
+    "outDir": "dist",
+    "moduleResolution": "node",
+    "types": ["node"]
+  },
+  "include": ["api"]
+}
