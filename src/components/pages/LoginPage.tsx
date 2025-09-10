@@ -12,13 +12,17 @@ import {
 } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { doc, updateDoc, getDoc } from "firebase/firestore";
+import { useAuth } from "@/contexts/AuthContext";
+import { GoogleIcon } from "@/components/ui/google-icon";
 
 export const LoginPage = () => {
   const navigate = useNavigate();
+  const { signInWithGoogle } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -104,6 +108,43 @@ export const LoginPage = () => {
       setError(message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    setError(null);
+
+    try {
+      await signInWithGoogle();
+      navigate("/");
+    } catch (err: any) {
+      let message = "Google sign-in failed";
+
+      switch (err.code) {
+        case "auth/popup-closed-by-user":
+          message = "Sign-in popup was closed. Please try again.";
+          break;
+        case "auth/popup-blocked":
+          message = "Popup was blocked by browser. Please allow popups and try again.";
+          break;
+        case "auth/cancelled-popup-request":
+          message = "Sign-in was cancelled. Please try again.";
+          break;
+        case "auth/network-request-failed":
+          message = "Network error. Please check your internet connection.";
+          break;
+        case "auth/internal-error":
+          message = "Something went wrong. Please try again.";
+          break;
+        default:
+          console.error("Unhandled Google sign-in error:", err);
+          message = err.message || "Something went wrong. Please try again.";
+      }
+
+      setError(message);
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -200,11 +241,30 @@ export const LoginPage = () => {
               type="submit"
               variant="warm"
               className="w-full"
-              disabled={loading}
+              disabled={loading || googleLoading}
             >
               {loading ? "Logging in..." : "Log In"}
             </Button>
           </form>
+
+          {/* Divider */}
+          <div className="flex items-center my-6">
+            <div className="flex-1 border-t border-border"></div>
+            <span className="px-3 text-sm text-muted-foreground">or</span>
+            <div className="flex-1 border-t border-border"></div>
+          </div>
+
+          {/* Google Sign In Button */}
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={handleGoogleSignIn}
+            disabled={loading || googleLoading}
+          >
+            <GoogleIcon className="w-5 h-5 mr-2" />
+            {googleLoading ? "Signing in..." : "Continue with Google"}
+          </Button>
 
           {/* Register Link */}
           <p className="text-sm text-muted-foreground text-center mt-4">

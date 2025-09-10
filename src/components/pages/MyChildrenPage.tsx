@@ -23,11 +23,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit2, Trash2, Settings, MessageCircle, ArrowLeft, Clock, Send } from "lucide-react";
+import { Plus, Edit2, Trash2, Settings, MessageCircle, ArrowLeft, Clock, Send, User as UserIcon, Heart } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
 import { ChildMessageCredits } from "@/components/shared/ChildMessageCredits";
 import { PersonalityEvaluation } from "@/components/shared/PersonalityEvaluation";
+import { ChildrenChat } from "@/components/features/chat/ChildrenChat";
+import { ParentChat } from "@/components/features/chat/ParentChat";
 
 
 const personalityDescriptions: Record<string, string> = {
@@ -56,6 +58,7 @@ interface ChildProfile {
   age: number;
   personalityProfile?: string;
   interests?: string[];
+  whatsappNumber?: string;
   remainingMessages?: number;
   isFrozen?: boolean;
 }
@@ -67,9 +70,12 @@ interface Message {
   timestamp: Date;
 }
 
+type ChatMode = 'children' | 'parents' | null;
+
 export const MyChildrenPage = () => {
   const [user, setUser] = useState<User | null>(null);
   const [userPlanId, setUserPlanId] = useState<string | null>(null);
+  const [userData, setUserData] = useState<any>(null); // Additional user data from Firebase
 
   const [children, setChildren] = useState<ChildProfile[]>([]);
 
@@ -83,12 +89,17 @@ export const MyChildrenPage = () => {
   });
   const [loading, setLoading] = useState(true);
   const [personalityEvalChild, setPersonalityEvalChild] = useState<ChildProfile | null>(null);
-  const [chatMode, setChatMode] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>(null);
   const [selectedChild, setSelectedChild] = useState<ChildProfile | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  
+  // Separate state for parent chat
+  const [parentMessages, setParentMessages] = useState<Message[]>([]);
+  const [parentSessionId, setParentSessionId] = useState<string | null>(null);
+  
   const [childrenWithSessions, setChildrenWithSessions] = useState<Set<string>>(new Set());
   const navigate = useNavigate();
 
@@ -129,12 +140,14 @@ export const MyChildrenPage = () => {
         }
         setChildrenWithSessions(sessionsSet);
 
-        // Fetch user's planId
+        // Fetch user's planId and additional user data
         const userDocRef = doc(db, "users", user.uid);
         const userDocSnap = await getDoc(userDocRef);
         if (userDocSnap.exists()) {
-          const planId = userDocSnap.data()?.planId || "free";
+          const firebaseUserData = userDocSnap.data();
+          const planId = firebaseUserData?.planId || "free";
           setUserPlanId(planId);
+          setUserData(firebaseUserData); 
 
           //  Fetch plan data
           const planDocRef = doc(db, "plans", planId);
@@ -311,47 +324,77 @@ export const MyChildrenPage = () => {
     setPersonalityEvalChild(null);
   };
 
-  const handleStartChat = async (child: ChildProfile) => {
+  const handleStartChat = async (child: ChildProfile, mode: ChatMode = 'children') => {
     if (!user) return;
 
     setSelectedChild(child);
-    setChatMode(true);
+    setChatMode(mode);
 
     try {
       const hasPreviousSessions = childrenWithSessions.has(child.id);
+      
+      // Use separate session IDs and message histories for different chat modes
+      const isParentMode = mode === 'parents';
 
       if (hasPreviousSessions) {
-        // Get existing sessions and continue with the most recent one
+        // Get existing sessions and continue with the most recent one for this specific mode
         const existingSessions = await getChatSessions(user.uid, child.id);
         if (existingSessions && existingSessions.length > 0) {
-          const mostRecentSession = existingSessions[0];
-          setCurrentSessionId(mostRecentSession.id);
+          // Filter sessions by mode to get mode-specific history
+          const modeFilteredSessions = existingSessions.filter(session => 
+            isParentMode ? session.title.includes('Dad & Mom') : !session.title.includes('Dad & Mom')
+          );
+          
+          if (modeFilteredSessions.length > 0) {
+            const mostRecentSession = modeFilteredSessions[0];
+            
+            if (isParentMode) {
+              setParentSessionId(mostRecentSession.id);
+            } else {
+              setCurrentSessionId(mostRecentSession.id);
+            }
 
-          // Load existing messages from the most recent session
-          const existingMessages = await getChatMessages(user.uid, child.id, mostRecentSession.id);
-          const formattedMessages: Message[] = existingMessages.map(msg => ({
-            id: msg.id,
-            content: msg.content,
-            type: msg.type,
-            timestamp: msg.timestamp
-          }));
+            // Load existing messages from the most recent session for this mode
+            const existingMessages = await getChatMessages(user.uid, child.id, mostRecentSession.id);
+            
+            const formattedMessages: Message[] = existingMessages.map(msg => ({
+              id: msg.id,
+              content: msg.content,
+              type: msg.type,
+              timestamp: msg.timestamp
+            }));
 
-          setMessages(formattedMessages);
-          return;
+            if (isParentMode) {
+              setParentMessages(formattedMessages);
+            } else {
+              setMessages(formattedMessages);
+            }
+            return;
+          }
         }
       }
 
-      // Create new chat session (first time or no existing sessions)
+      // Create new chat session (first time or no existing sessions for this mode)
       const sessionId = await createChatSession(
         user.uid,
         child.id,
-        `Chat with ${child.name} - ${new Date().toLocaleDateString()}`
+        `${mode === 'parents' ? 'Dad & Mom' : mode.charAt(0).toUpperCase() + mode.slice(1)} Chat with ${child.name} - ${new Date().toLocaleDateString()}`
       );
-      setCurrentSessionId(sessionId);
+      
+      if (isParentMode) {
+        setParentSessionId(sessionId);
+      } else {
+        setCurrentSessionId(sessionId);
+      }
+
+      const welcomeMessages = {
+        children: `Hi! I'm here to help you with ${child.name}. How can I support you today?`,
+        parents: `Welcome to Dad and Mom Mode! I'm here to provide immediate assistance/emergency response to any problem about your child. What would you like to ask?`
+      };
 
       const welcomeMessage: Message = {
         id: '1',
-        content: `Hi! I'm here to help you with ${child.name}. How can I support you today?`,
+        content: welcomeMessages[mode] || welcomeMessages.children,
         type: 'assistant',
         timestamp: new Date()
       };
@@ -362,71 +405,66 @@ export const MyChildrenPage = () => {
         type: 'assistant'
       });
 
-      setMessages([welcomeMessage]);
+      if (isParentMode) {
+        setParentMessages([welcomeMessage]);
+      } else {
+        setMessages([welcomeMessage]);
+      }
 
       // Update the sessions set to include this child
       setChildrenWithSessions(prev => new Set([...prev, child.id]));
     } catch (error) {
       console.error("Error starting chat:", error);
       // Fallback to local-only chat
-      setMessages([
-        {
-          id: '1',
-          content: `Hi! I'm here to help you with ${child.name}. How can I support you today?`,
-          type: 'assistant',
-          timestamp: new Date()
-        }
-      ]);
+      const fallbackWelcome = mode === 'parents' 
+        ? `Welcome to Dad and Mom Mode! I'm here to provide immediate assistance/emergency response to any problem about your child. What would you like to ask?`
+        : `Hi! I'm here to help you with ${child.name}. How can I support you today?`;
+        
+      const fallbackMessage = {
+        id: '1',
+        content: fallbackWelcome,
+        type: 'assistant' as const,
+        timestamp: new Date()
+      };
+      
+      if (mode === 'parents') {
+        setParentMessages([fallbackMessage]);
+      } else {
+        setMessages([fallbackMessage]);
+      }
     }
   };
 
   const handleBackToChildren = () => {
-    setChatMode(false);
+    setChatMode(null);
     setSelectedChild(null);
     setMessages([]);
+    setParentMessages([]);
     setInputValue("");
     setCurrentSessionId(null);
+    setParentSessionId(null);
   };
 
-  // Generate conversation summary when needed
+  // Generate conversation summary when needed (local implementation)
   const generateConversationSummary = async (messagesToSummarize: Message[]): Promise<string> => {
     try {
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-      if (!apiKey) {
-        throw new Error('OpenAI API key not found');
-      }
-
+      // Create a simple local summary based on message content
       const conversationText = messagesToSummarize
         .map(msg => `${msg.type === 'user' ? 'Parent' : 'Coach'}: ${msg.content}`)
-        .join('\n');
+        .join(' ');
 
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'user',
-              content: `Get the most valuable information from this conversation about the child that can be used as context for further questions. Provide 2-3 sentences summarizing key insights about the child's behavior, challenges, progress, or important family context:\n\n${conversationText}`
-            }
-          ],
-          max_tokens: 150,
-          temperature: 0.3,
-        }),
-      });
+      // Extract key topics and themes (simple keyword-based approach)
+      const keywords = ['behavior', 'challenge', 'progress', 'school', 'sleep', 'eating', 'emotion', 'friend', 'sibling', 'development'];
+      const mentionedTopics = keywords.filter(keyword => 
+        conversationText.toLowerCase().includes(keyword)
+      );
 
-      if (response.ok) {
-        const data = await response.json();
-        return data.choices[0].message.content.trim();
-      }
-      return '';
+      const summary = `Recent conversation covered: ${mentionedTopics.length > 0 ? mentionedTopics.join(', ') : 'general parenting topics'}. Last ${messagesToSummarize.length} messages in this session.`;
+      
+      return summary;
     } catch (error) {
       console.error('Error generating summary:', error);
-      return '';
+      return 'Recent conversation summary unavailable.';
     }
   };
 
@@ -453,7 +491,6 @@ export const MyChildrenPage = () => {
     setIsLoading(true);
 
     try {
-      // Save user message to Firebase
       if (currentSessionId) {
         await saveChatMessage(user.uid, selectedChild.id, currentSessionId, {
           content: currentInput,
@@ -461,74 +498,69 @@ export const MyChildrenPage = () => {
         });
       }
 
-      // Get API key from environment variables
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-
-      if (!apiKey) {
-        throw new Error('OPENAI_API_KEY environment variable not found');
-      }
-
-      // Check if we need to generate a summary (every 10 messages)
-      const totalMessages = messages.length + 1; // +1 for the message we just added
-      if (totalMessages > 10 && totalMessages % 10 === 0) {
-        const messagesToSummarize = messages.slice(-10); // Last 10 messages
-        const summary = await generateConversationSummary(messagesToSummarize);
-        
-        if (summary && currentSessionId) {
-          await saveConversationSummary(user.uid, selectedChild.id, currentSessionId, summary);
+      let currentUserData = userData;
+      if (!currentUserData) {
+        const userDocRef = doc(db, "users", user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          currentUserData = userDocSnap.data();
+          setUserData(currentUserData); // Cache for future use
         }
       }
 
-      // Get all conversation summaries for context
-      const summaries = currentSessionId ? await getConversationSummaries(user.uid, selectedChild.id, currentSessionId) : [];
-      const valuableInformation = summaries.length > 0 ? summaries.join(' ') : 'No previous context available.';
+      const parentEmail = user.email || currentUserData?.email || 'No email available';
 
-      // Extract child details
+      const childName = selectedChild.name;
       const childAge = selectedChild.age;
-      const personalityProfile = selectedChild.personalityProfile
-        ? (selectedChild.personalityProfile.includes('|')
-          ? selectedChild.personalityProfile.split('|')[1]
-          : `MBTI Type: ${selectedChild.personalityProfile}`)
-        : "No personality profile available yet.";
-      
+      const personalityProfile = selectedChild.personalityProfile || "No personality profile available yet.";
       const interests = selectedChild.interests && selectedChild.interests.length > 0
-        ? selectedChild.interests.join(', ')
-        : 'No specific interests recorded.';
+        ? selectedChild.interests
+        : [];
 
-      // Create the new system prompt
-      const systemPrompt = `You are a personal parenting coach continuing a conversation:
+      const summaries = currentSessionId ? await getConversationSummaries(user.uid, selectedChild.id, currentSessionId) : [];
+      const previousContext = summaries.length > 0 ? summaries.join(' ') : 'No previous context available.';
 
-This is the latest message: ${currentInput}
-This is the valuable information from the conversations: ${valuableInformation}
-This is the basic details of the child: Age ${childAge}, Personality: ${personalityProfile}, Interests: ${interests}
+      const webhookPayload = {
+        parent: {
+          email: parentEmail,
+          uid: user.uid
+        },
+        child: {
+          id: selectedChild.id,
+          name: childName,
+          age: childAge,
+          personalityProfile: personalityProfile,
+          interests: interests
+        },
+        latestMessage: currentInput
+      }; 
 
-Send a reply that sounds like a real human. Write naturally like you're texting a friend. Do NOT use asterisks, bullet points, numbered lists, or any formatting. No **bold text**, no *italics*, no special symbols. Just write in plain conversational text with normal sentences and paragraphs.`;
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch('https://sandbox-n8n.fly.dev/webhook/8948c09e-7906-40a3-ad99-6b38adbdf3e8', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: systemPrompt
-            }
-          ],
-          max_tokens: 300,
-          temperature: 0.7,
-        }),
+        body: JSON.stringify(webhookPayload),
       });
 
       let assistantContent: string;
       if (response.ok) {
         const data = await response.json();
-        assistantContent = data.choices[0].message.content;
+        console.log("Response Data:", data);
+        
+        assistantContent = 
+          data?.[0]?.Reponse ||         
+          data?.[0]?.Response ||        
+          data?.Reponse ||              
+          data?.Response ||              
+          data?.message ||              
+          data?.response ||              
+          data?.content ||               
+          JSON.stringify(data);          
       } else {
-        throw new Error('API call failed');
+        const errorText = await response.text();
+        console.error("Webhook Error Response:", errorText);
+        throw new Error(`Webhook call failed with status ${response.status}: ${errorText}`);
       }
 
       const assistantMessage: Message = {
@@ -547,11 +579,23 @@ Send a reply that sounds like a real human. Write naturally like you're texting 
       }
 
       setMessages(prev => [...prev, assistantMessage]);
+
+      // Check if we need to generate a summary (every 10 messages)
+      const totalMessages = messages.length + 2; // +2 for user and assistant messages we just added
+      if (totalMessages > 10 && totalMessages % 10 === 0) {
+        const messagesToSummarize = [...messages, userMessage, assistantMessage].slice(-10); // Last 10 messages
+        const summary = await generateConversationSummary(messagesToSummarize);
+        
+        if (summary && currentSessionId) {
+          await saveConversationSummary(user.uid, selectedChild.id, currentSessionId, summary);
+        }
+      }
+
     } catch (error) {
-      console.error('Error getting response:', error);
+      
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: "I'm having trouble connecting right now. Please check that the OpenAI API key is properly set up and try again.",
+        content: `I'm having trouble connecting right now. Please try again later. Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
         type: 'assistant',
         timestamp: new Date()
       };
@@ -585,86 +629,34 @@ Send a reply that sounds like a real human. Write naturally like you're texting 
     );
   }
 
-  // Chat Interface
-  if (chatMode && selectedChild) {
-    return (
-      <div className="min-h-screen bg-gradient-subtle flex flex-col">
-        {/* Chat Header */}
-        <div className="bg-card/80 backdrop-blur-sm border-b border-border/50 p-4">
-          <div className="container mx-auto flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="icon" onClick={handleBackToChildren}>
-                <ArrowLeft className="w-5 h-5" />
-              </Button>
-              <div>
-                <h1 className="font-semibold text-foreground">{selectedChild.name}'s Coach</h1>
-                <p className="text-sm text-muted-foreground">Personalized guidance for age {selectedChild.age}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 container mx-auto p-4 space-y-6 overflow-y-auto">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} fade-in-gentle`}
-            >
-              <div className={message.type === 'user' ? 'message-user' : 'message-assistant'}>
-                <p className="text-foreground leading-relaxed whitespace-pre-wrap">{message.content}</p>
-                <div className="flex items-center mt-2 text-xs text-muted-foreground">
-                  <Clock className="w-3 h-3 mr-1" />
-                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
-              </div>
-            </div>
-          ))}
-
-          {isLoading && (
-            <div className="flex justify-start fade-in-gentle">
-              <div className="message-assistant">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Input Area */}
-        <div className="bg-card/80 backdrop-blur-sm border-t border-border/50 p-4">
-          <div className="container mx-auto">
-            <div className="flex space-x-2">
-              <Textarea
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder={`Tell me about ${selectedChild.name} or ask a question...`}
-                className="flex-1 border-border/50 focus:border-primary transition-gentle resize-none"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                disabled={isLoading}
-                rows={2}
-              />
-              <Button
-                variant="warm"
-                onClick={handleSendMessage}
-                disabled={!inputValue.trim() || isLoading}
-                className="self-end"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+  // Chat Interface Routing
+  if (chatMode && selectedChild && user) {
+    if (chatMode === 'children') {
+      return (
+        <ChildrenChat
+          user={user}
+          selectedChild={selectedChild}
+          userData={userData}
+          messages={messages}
+          setMessages={setMessages}
+          currentSessionId={currentSessionId}
+          onBackToChildren={handleBackToChildren}
+        />
+      );
+    } else if (chatMode === 'parents') {
+      return (
+        <ParentChat
+          user={user}
+          selectedChild={selectedChild}
+          userData={userData}
+          messages={parentMessages}
+          setMessages={setParentMessages}
+          currentSessionId={parentSessionId}
+          parentMode="parents"
+          onBackToChildren={handleBackToChildren}
+        />
+      );
+    }
   }
 
   return (
@@ -876,17 +868,30 @@ Send a reply that sounds like a real human. Write naturally like you're texting 
                   <ChildMessageCredits childId={child.id} />
                 </div>
 
-                <Button
-                  variant="warm"
-                  className="w-full"
-                  onClick={() => handleStartChat(child)}
-                  disabled={!child.personalityProfile}
-                >
-                  <MessageCircle className="w-4 h-4 mr-2" />
-                  {childrenWithSessions.has(child.id) ? 'Continue Chat' : 'Start Chat'}
-                </Button>
+                <div className="space-y-2">
+                  <Button
+                    variant="warm"
+                    className="w-full"
+                    onClick={() => handleStartChat(child, 'children')}
+                    disabled={!child.personalityProfile}
+                  >
+                    <MessageCircle className="w-4 h-4 mr-2" />
+                    {childrenWithSessions.has(child.id) ? 'Continue Chat' : 'Start Chat'}
+                  </Button>
+                  
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => handleStartChat(child, 'parents')}
+                    disabled={!child.personalityProfile}
+                  >
+                    <Heart className="w-4 h-4 mr-2" />
+                    Dad & Mom Mode
+                  </Button>
+                </div>
+                
                 {!child.personalityProfile && (
-                  <p className="text-xs text-muted-foreground mt-1 text-center">
+                  <p className="text-xs text-muted-foreground mt-2 text-center">
                     Complete personality profile to start chatting
                   </p>
                 )}
