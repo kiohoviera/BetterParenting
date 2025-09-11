@@ -23,8 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit2, Trash2, Settings, MessageCircle, ArrowLeft, Clock, Send, User as UserIcon, Heart } from "lucide-react";
-import { Textarea } from "@/components/ui/textarea";
+import { Plus, Edit2, Trash2, Settings, MessageCircle, Heart } from "lucide-react";
 
 import { ChildMessageCredits } from "@/components/shared/ChildMessageCredits";
 import { PersonalityEvaluation } from "@/components/shared/PersonalityEvaluation";
@@ -92,8 +91,6 @@ export const MyChildrenPage = () => {
   const [chatMode, setChatMode] = useState<ChatMode>(null);
   const [selectedChild, setSelectedChild] = useState<ChildProfile | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputValue, setInputValue] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   
   // Separate state for parent chat
@@ -440,170 +437,11 @@ export const MyChildrenPage = () => {
     setSelectedChild(null);
     setMessages([]);
     setParentMessages([]);
-    setInputValue("");
     setCurrentSessionId(null);
     setParentSessionId(null);
   };
 
-  // Generate conversation summary when needed (local implementation)
-  const generateConversationSummary = async (messagesToSummarize: Message[]): Promise<string> => {
-    try {
-      // Create a simple local summary based on message content
-      const conversationText = messagesToSummarize
-        .map(msg => `${msg.type === 'user' ? 'Parent' : 'Coach'}: ${msg.content}`)
-        .join(' ');
-
-      // Extract key topics and themes (simple keyword-based approach)
-      const keywords = ['behavior', 'challenge', 'progress', 'school', 'sleep', 'eating', 'emotion', 'friend', 'sibling', 'development'];
-      const mentionedTopics = keywords.filter(keyword => 
-        conversationText.toLowerCase().includes(keyword)
-      );
-
-      const summary = `Recent conversation covered: ${mentionedTopics.length > 0 ? mentionedTopics.join(', ') : 'general parenting topics'}. Last ${messagesToSummarize.length} messages in this session.`;
-      
-      return summary;
-    } catch (error) {
-      console.error('Error generating summary:', error);
-      return 'Recent conversation summary unavailable.';
-    }
-  };
-
-  const handleSendMessage = async () => {
-    if (!inputValue.trim() || !selectedChild || !user) return;
-
-    // Check message credits first
-    const hasCredits = await checkMessageCredits(user.uid, selectedChild.id);
-    if (!hasCredits) {
-      alert("No message credits remaining for this child. Please upgrade your plan.");
-      return;
-    }
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: inputValue,
-      type: 'user',
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    const currentInput = inputValue;
-    setInputValue("");
-    setIsLoading(true);
-
-    try {
-      if (currentSessionId) {
-        await saveChatMessage(user.uid, selectedChild.id, currentSessionId, {
-          content: currentInput,
-          type: 'user'
-        });
-      }
-
-      let currentUserData = userData;
-      if (!currentUserData) {
-        const userDocRef = doc(db, "users", user.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        if (userDocSnap.exists()) {
-          currentUserData = userDocSnap.data();
-          setUserData(currentUserData); // Cache for future use
-        }
-      }
-
-      const parentEmail = user.email || currentUserData?.email || 'No email available';
-
-      const childName = selectedChild.name;
-      const childAge = selectedChild.age;
-      const personalityProfile = selectedChild.personalityProfile || "No personality profile available yet.";
-      const interests = selectedChild.interests && selectedChild.interests.length > 0
-        ? selectedChild.interests
-        : [];
-
-      const summaries = currentSessionId ? await getConversationSummaries(user.uid, selectedChild.id, currentSessionId) : [];
-      const previousContext = summaries.length > 0 ? summaries.join(' ') : 'No previous context available.';
-
-      const webhookPayload = {
-        parent: {
-          email: parentEmail,
-          uid: user.uid
-        },
-        child: {
-          id: selectedChild.id,
-          name: childName,
-          age: childAge,
-          personalityProfile: personalityProfile,
-          interests: interests
-        },
-        latestMessage: currentInput
-      }; 
-
-      const response = await fetch('https://sandbox-n8n.fly.dev/webhook/8948c09e-7906-40a3-ad99-6b38adbdf3e8', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(webhookPayload),
-      });
-
-      let assistantContent: string;
-      if (response.ok) {
-        const data = await response.json();
-        console.log("Response Data:", data);
-        
-        assistantContent = 
-          data?.[0]?.Reponse ||         
-          data?.[0]?.Response ||        
-          data?.Reponse ||              
-          data?.Response ||              
-          data?.message ||              
-          data?.response ||              
-          data?.content ||               
-          JSON.stringify(data);          
-      } else {
-        const errorText = await response.text();
-        console.error("Webhook Error Response:", errorText);
-        throw new Error(`Webhook call failed with status ${response.status}: ${errorText}`);
-      }
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: assistantContent,
-        type: 'assistant',
-        timestamp: new Date()
-      };
-
-      // Save assistant message to Firebase
-      if (currentSessionId) {
-        await saveChatMessage(user.uid, selectedChild.id, currentSessionId, {
-          content: assistantContent,
-          type: 'assistant'
-        });
-      }
-
-      setMessages(prev => [...prev, assistantMessage]);
-
-      // Check if we need to generate a summary (every 10 messages)
-      const totalMessages = messages.length + 2; // +2 for user and assistant messages we just added
-      if (totalMessages > 10 && totalMessages % 10 === 0) {
-        const messagesToSummarize = [...messages, userMessage, assistantMessage].slice(-10); // Last 10 messages
-        const summary = await generateConversationSummary(messagesToSummarize);
-        
-        if (summary && currentSessionId) {
-          await saveConversationSummary(user.uid, selectedChild.id, currentSessionId, summary);
-        }
-      }
-
-    } catch (error) {
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: `I'm having trouble connecting right now. Please try again later. Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        type: 'assistant',
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    }
-
-    setIsLoading(false);
-  };
+  // Chat functionality has been moved to separate components: ChildrenChat and ParentChat
 
 
   if (loading) {
