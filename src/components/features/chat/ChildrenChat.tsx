@@ -169,11 +169,11 @@ export const ChildrenChat = ({
       };
 
       console.log("=== DEBUG: Webhook Payload ===");
-      console.log("Webhook URL:", 'https://sandbox-n8n.fly.dev/webhook/8948c09e-7906-40a3-ad99-6b38adbdf3e8');
+      console.log("Webhook URL:", 'https://sandbox-n8n.fly.dev/webhook/9e90279c-dd1a-4e7f-a23f-4ec524797cdc');
       console.log("Payload:", JSON.stringify(webhookPayload, null, 2));
 
       // Send POST request to webhook (Children Chat URL)
-      const response = await fetch('https://sandbox-n8n.fly.dev/webhook-test/9e90279c-dd1a-4e7f-a23f-4ec524797cdc', {
+      const response = await fetch('https://sandbox-n8n.fly.dev/webhook/9e90279c-dd1a-4e7f-a23f-4ec524797cdc', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
