@@ -269,7 +269,7 @@ export const LoginPage = () => {
           {/* Register Link */}
           <p className="text-sm text-muted-foreground text-center mt-4">
             Don't have an account?{" "}
-            <a href="/register" className="text-primary underline">Register</a>
+            <a href="/signup" className="text-primary underline">Register</a>
           </p>
         </Card>
       </main>

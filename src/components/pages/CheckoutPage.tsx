@@ -71,7 +71,7 @@ export const CheckoutPage = () => {
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (!user) {
-        navigate(`/register?next=checkout&plan=${planId}`);
+        navigate(`/signup?next=checkout&plan=${planId}`);
         return;
       }
 

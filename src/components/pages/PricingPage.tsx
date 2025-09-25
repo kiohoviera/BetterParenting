@@ -73,7 +73,7 @@ export const PricingPage = () => {
   // Main subscribe handler
   const handleSubscribe = (planId: string) => {
     if (!currentUser) {
-      navigate(`/register?next=checkout&plan=${planId}`);
+      navigate(`/signup?next=checkout&plan=${planId}`);
       return;
     }
 
